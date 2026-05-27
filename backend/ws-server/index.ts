@@ -39,3 +39,21 @@ const users: Map<string, UserConnection> = new Map();
 
 //roomId --> set of userIds
 const rooms: Map<string, Set<string>> = new Map();
+
+// ========================
+// ! REDIS SETUP
+// ========================
+
+//this is how you do redis setup okay
+
+const publisher: RedisClientType = createClient();
+const subscriber: RedisClientType = createClient();
+
+async function setupRedis(): Promise<void> {
+  await publisher.connect();
+  console.log("Publisher connect successfully");
+  await subscriber.connect();
+  console.log("Subscriber connet successfully");
+
+  console.log("Redis connected successfully ✅✅");
+}
