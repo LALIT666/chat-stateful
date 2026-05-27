@@ -104,9 +104,14 @@ async function subscribeToRoom(roomId: string): Promise<void> {
 // ! HANDLERS
 // ========================
 
+// !GENERATE ID
+
 function generateId(): string {
   return Math.random().toString(36).substring(2, 10);
 }
+// ========================
+// ! HADLE JOIN
+// ========================
 
 function handleJoin(user: UserConnection, roomId: string): void {
   user.rooms.add(roomId);
@@ -121,6 +126,10 @@ function handleJoin(user: UserConnection, roomId: string): void {
   rooms.get(roomId)?.add(user.userId);
   console.log(`👤 ${user.userId} joined room: ${roomId}`);
 }
+
+// ========================
+// ! HANDLE CHAT
+// ========================
 
 async function handleChat(
   user: UserConnection,
@@ -143,6 +152,9 @@ async function handleChat(
 
   await publisher.publish(roomId, JSON.stringify(payload));
 }
+// ========================
+// ! HANDLE DISCONNECT
+// ========================
 
 function handleDisconnect(userId: string): void {
   const user = users.get(userId);
