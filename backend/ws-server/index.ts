@@ -98,3 +98,66 @@ async function subscribeToRoom(roomId: string): Promise<void> {
     }
   });
 }
+
+// ========================
+// ! HANDLERS
+// ========================
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 10);
+}
+
+function handleJoin(user: UserConnection, roomId: string): void {
+  user.rooms.add(roomId);
+
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, new Set());
+
+    //matlab ki first time room hum bana rahe hai and toh phir subscribe karo
+    subscribeToRoom(roomId);
+  }
+
+  rooms.get(roomId)?.add(user.userId);
+  console.log(`👤 ${user.userId} joined room: ${roomId}`);
+}
+
+async function handleChat(
+  user: UserConnection,
+  roomId: string,
+  message: string,
+): Promise<void> {
+  if (!user.rooms.has(roomId)) {
+    user.socket.send(
+      JSON.stringify({ type: "error", message: "You are not in this room" }),
+    );
+
+    return;
+  }
+
+  const payload: RedisPayload = {
+    roomId,
+    message,
+    senderId: user.userId,
+  };
+
+  await publisher.publish(roomId, JSON.stringify(payload));
+}
+
+function handleDisconnect(userId: string): void {
+  const user = users.get(userId);
+  if (!user) return;
+
+  for (const roomId of user.rooms) {
+    const roomUsers = rooms.get(roomId);
+    if (roomUsers) {
+      roomUsers.delete(userId);
+      if (roomUsers.size === 0) {
+        rooms.delete(roomId);
+        subscriber.unsubscribe(roomId);
+      }
+    }
+  }
+
+  users.delete(userId);
+  console.log(`❌ ${userId} disconnected`);
+}
