@@ -24,3 +24,18 @@ interface RedisPayload {
 }
 
 type IncomingMessage = JoinMessage | ChatMessage;
+
+// ========================
+// ! STATE
+// ========================
+
+interface UserConnection {
+  socket: WebSocket;
+  userId: string;
+  rooms: Set<string>;
+}
+
+const users: Map<string, UserConnection> = new Map();
+
+//roomId --> set of userIds
+const rooms: Map<string, Set<string>> = new Map();
