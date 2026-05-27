@@ -15,6 +15,7 @@ interface JoinMessage {
 interface ChatMessage {
   type: "chat";
   roomId: string;
+  message: string;
 }
 
 interface RedisPayload {
@@ -161,3 +162,59 @@ function handleDisconnect(userId: string): void {
   users.delete(userId);
   console.log(`❌ ${userId} disconnected`);
 }
+
+// ========================
+// ! WEBSOCKET SERVER
+// ========================
+
+const PORT = parseInt(process.env.PORT || "8080");
+
+async function main(): Promise<void> {
+  await setupRedis();
+
+  const wss = new WebSocketServer({ port: PORT });
+
+  wss.on("connection", (socket: WebSocket) => {
+    const userId = generateId();
+
+    const user: UserConnection = {
+      socket,
+      userId,
+      rooms: new Set(),
+    };
+
+    users.set(userId, user);
+    console.log(`user with userId: ${userId} connected successfully`);
+
+    socket.send(JSON.stringify({ type: "connected", userId }));
+
+    socket.on("message", async (raw: Buffer) => {
+      try {
+        //jo buffer aaya usko  string me conver kara and then usko json obj me
+        const data: IncomingMessage = JSON.parse(raw.toString());
+
+        switch (data.type) {
+          case "join":
+            handleJoin(user, data.roomId);
+
+            break;
+          case "chat":
+            await handleChat(user, data.roomId, data.message);
+            break;
+
+          default:
+            socket.send(
+              JSON.stringify({ type: "error", message: "Unknown type" }),
+            );
+            break;
+        }
+      } catch (error) {
+        socket.send(JSON.stringify({ type: "error", message: "Invalid JOSN" }));
+      }
+    });
+
+    console.log(`🚀 WS server running on port ${PORT}`);
+  });
+}
+
+main();
