@@ -1,6 +1,14 @@
 // 2nd
 import { WebSocket, WebSocketServer } from "ws";
 
+interface UserConnection {
+  socket: WebSocket;
+  userId: string;
+  rooms: Set<string>;
+}
+
+const users: Map<string, UserConnection> = new Map();
+
 const PORT = parseInt(process.env.PORT || "8080");
 
 const wss = new WebSocketServer({ port: PORT });
@@ -11,6 +19,15 @@ function generateId() {
 
 wss.on("connection", (socket: WebSocket) => {
   const userId = generateId();
+
+  const user: UserConnection = {
+    socket,
+    userId,
+    rooms: new Set(),
+  };
+
+  users.set(userId, user);
+
   console.log(`user with userId: ${userId} is connected`);
 
   socket.send(JSON.stringify({ type: "connected", userId }));
