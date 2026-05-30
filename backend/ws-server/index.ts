@@ -1,22 +1,7 @@
-// 2nd
 import { WebSocket, WebSocketServer } from "ws";
-import { createClient, type RedisClientType } from "redis";
+import { type RedisClientType, createClient } from "redis";
 
-const publisher: RedisClientType = createClient();
-const subscriber: RedisClientType = createClient();
-
-async function setupRedis(): Promise<void> {
-  await publisher.connect();
-  await subscriber.connect();
-  console.log("Redis connected ✅");
-}
-
-interface RedisPayLoad {
-  message: string;
-  roomId: string;
-  j;
-  senderId: string;
-}
+const PORT = parseInt(process.env.PORT || "8080");
 
 interface JoinMessage {
   type: "join_room";
@@ -29,7 +14,13 @@ interface ChatMessage {
   message: string;
 }
 
-type IncomingMessage = ChatMessage | JoinMessage;
+type IncommingMessage = JoinMessage | ChatMessage;
+
+interface RedisPayload {
+  roomId: string;
+  senderId: string;
+  message: string;
+}
 
 interface UserConnection {
   socket: WebSocket;
@@ -37,35 +28,40 @@ interface UserConnection {
   rooms: Set<string>;
 }
 
-//userid userconnection object
 const users: Map<string, UserConnection> = new Map();
 
-//roomid , set of usersids
 const rooms: Map<string, Set<string>> = new Map();
 
-const PORT = parseInt(process.env.PORT || "8080");
+const publisher: RedisClientType = createClient();
+const subscriber: RedisClientType = createClient();
 
-const wss = new WebSocketServer({ port: PORT });
+async function setupRedis() {
+  console.log("Redis connection...");
+  await publisher.connect();
+  console.log("Redis publisher connecte successfully");
+  await subscriber.connect();
+  console.log("Redis subscriber connected successfully");
+  console.log("Redis connectd ✅");
+}
 
-async function subscribeToRoom(roomId: string): Promise<void> {
+async function subscribeRoom(roomId: string): Promise<void> {
   await subscriber.subscribe(roomId, (data: string) => {
-    const parsedData: RedisPayLoad = JSON.parse(data);
+    const parsedData: RedisPayload = JSON.parse(data);
 
-    const roomUsers = rooms.get(roomId);
-
+    const roomUsers = rooms.get(parsedData.roomId);
     if (!roomUsers) return;
 
-    for (const userId of roomUsers) {
-      const user = users.get(userId);
+    for (const userIdInRoom of roomUsers) {
+      const user = users.get(userIdInRoom);
       if (!user) continue;
-      if (parsedData.senderId === user.userId) continue;
+      if (user.userId === parsedData.senderId) continue;
 
       if (user.socket.readyState === WebSocket.OPEN) {
         user.socket.send(
           JSON.stringify({
             type: "chat",
-            roomId: parsedData.roomId,
             message: parsedData.message,
+            roomId: parsedData.roomId,
           }),
         );
       }
@@ -77,44 +73,44 @@ function generateId() {
   return Math.random().toString(36).substring(2, 10);
 }
 
-function handleJoinRoom(user: UserConnection, roomId: string) {
+async function handleJoin(user: UserConnection, roomId: string) {
   user.rooms.add(roomId);
 
   if (!rooms.has(roomId)) {
     rooms.set(roomId, new Set());
-    subscribeToRoom(roomId);
+    await subscribeRoom(roomId);
   }
 
   rooms.get(roomId)?.add(user.userId);
-  console.log(`${user.userId}, roomid: ${roomId}`);
+  console.log(
+    `user with userId: ${user.userId} join the room with roomId: ${roomId}`,
+  );
 }
 
 async function handleChat(
   user: UserConnection,
-  message: string,
   roomId: string,
+  message: string,
 ): Promise<void> {
   if (!user.rooms.has(roomId)) {
     user.socket.send(
       JSON.stringify({
         type: "error",
-        message: "you are not the part of this room",
+        message: "you are not part of this room",
       }),
     );
     return;
   }
-
-  const publishPayload: RedisPayLoad = {
+  const publisherPayload: RedisPayload = {
     roomId,
-    message,
     senderId: user.userId,
-  };
 
-  await publisher.publish(roomId, JSON.stringify(publishPayload));
+    message,
+  };
+  await publisher.publish(roomId, JSON.stringify(publisherPayload));
 }
 
-//
-function handleDisconnect(userId: string) {
+async function disConnect(userId: string) {
   const user = users.get(userId);
   if (!user) return;
   for (const roomId of user.rooms) {
@@ -122,18 +118,23 @@ function handleDisconnect(userId: string) {
     if (roomUsers) {
       roomUsers.delete(userId);
       if (roomUsers.size === 0) {
+        await subscriber.unsubscribe(roomId);
         rooms.delete(roomId);
-        subscriber.unsubscribe(roomId);
       }
     }
   }
 
   users.delete(userId);
-  console.log(`${userId}, disconnected`);
+  console.log(`❌ ${userId} disconnected`);
 }
 
-async function main(): Promise<void> {
+const wss = new WebSocketServer({ port: PORT });
+
+async function main() {
+  await setupRedis();
+  console.log(`WebSocket Server running on port ${PORT}`);
   wss.on("connection", (socket: WebSocket) => {
+    console.log("New client connected");
     const userId = generateId();
 
     const user: UserConnection = {
@@ -144,34 +145,38 @@ async function main(): Promise<void> {
 
     users.set(userId, user);
 
-    console.log(`user with userId: ${userId} is connected`);
+    socket.send(
+      JSON.stringify({
+        type: "connected",
+        message: `User connected successfully 👍 with userId: ${userId}`,
+      }),
+    );
+    socket.on("message", (data: Buffer) => {
+      try {
+        const parsedData: IncommingMessage = JSON.parse(data.toString());
 
-    socket.send(JSON.stringify({ type: "connected", userId }));
+        switch (parsedData.type) {
+          case "join_room":
+            handleJoin(user, parsedData.roomId);
+            break;
+          case "chat":
+            handleChat(user, parsedData.roomId, parsedData.message);
+            break;
 
-    socket.on("message", (rawData: Buffer) => {
-      const dataParsed: IncomingMessage = JSON.parse(rawData.toString());
-
-      switch (dataParsed.type) {
-        case "chat":
-          handleChat(user, dataParsed.message, dataParsed.roomId);
-          break;
-        case "join_room":
-          handleJoinRoom(user, dataParsed.roomId);
-          break;
-
-        default:
-          socket.send(
-            JSON.stringify({ type: "error", message: "UNKNOWN TYPE" }),
-          );
-          break;
+          default:
+            socket.send(
+              JSON.stringify({ type: "error", message: "UNKNOWN TYPE" }),
+            );
+            break;
+        }
+      } catch (error) {
+        console.error("error ", error);
+        socket.send(JSON.stringify({ type: "error", message: "invalid JSON" }));
       }
     });
-    console.log("New client connected");
 
-    socket.on("close", () => handleDisconnect(userId));
+    socket.on("close", () => disConnect(userId));
   });
-
-  console.log(`WS Server is running on port: ${PORT}`);
 }
 
 main();
